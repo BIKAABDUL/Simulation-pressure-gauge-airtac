@@ -1,0 +1,1565 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Simulator AirTAC DPS</title>
+<style>/* Layout: stage (FRL + sensor) left, panel/latihan cards right; stacks to one column on phones. */
+:root {
+  --bg: #e9ecef; --card: #ffffff; --ink: #1d2329; --muted: #5d6873; --line: #d5dae0;
+  --accent: #2f6fd0; --ok: #1f9d55; --warn: #d9822b;
+  --o1: #31c24a; --o2: #f29a1a;
+  --chip: #e8ecf0; --press: #e6edf7; --line-hover: #b6bec7; --cur-bg: #f1f6fd;
+  --ok-bg: #e5f6ec; --ok-ink: #13663a; --kbd-bg: #f6f7f9;
+  --radius: 12px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12161a; --card: #1b2127; --ink: #e6ebf0; --muted: #9aa6b2; --line: #2f3841;
+    --accent: #5b95ea; --ok: #3cc173;
+    --chip: #2a323b; --press: #22324a; --line-hover: #4a5663; --cur-bg: #1d2a3b;
+    --ok-bg: #173325; --ok-ink: #8fe3b2; --kbd-bg: #232a31;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12161a; --card: #1b2127; --ink: #e6ebf0; --muted: #9aa6b2; --line: #2f3841;
+  --accent: #5b95ea; --ok: #3cc173;
+  --chip: #2a323b; --press: #22324a; --line-hover: #4a5663; --cur-bg: #1d2a3b;
+  --ok-bg: #173325; --ok-ink: #8fe3b2; --kbd-bg: #232a31;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 15px/1.45 "Segoe UI", system-ui, -apple-system, Roboto, "Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif; }
+button { font: inherit; color: inherit; }
+
+.top { padding-block: 14px 6px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); max-width: 1360px; margin: 0 auto; }
+.top h1 { margin: 0; font-size: 20px; letter-spacing: .2px; }
+.top p { margin: 2px 0 0; color: var(--muted); font-size: 13.5px; }
+
+.layout { max-width: 1360px; margin: 0 auto; padding-block: 8px 24px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: grid; gap: 14px;
+  grid-template-columns: minmax(0, 1.55fr) minmax(300px, 1fr); align-items: start; }
+@media (max-width: 980px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+
+/* ---------- Stage ---------- */
+.stage-col { min-width: 0; }
+.stage { position: relative; width: 100%; aspect-ratio: 4 / 3; overflow: hidden; border-radius: var(--radius);
+  background: #1a1f25; box-shadow: 0 2px 10px rgba(0,0,0,.18); touch-action: none; user-select: none;
+  -webkit-user-select: none; -webkit-touch-callout: none; }
+@media (max-width: 600px) { .stage { aspect-ratio: 9 / 11; } }
+.world { position: absolute; left: 0; top: 0; width: 1000px; height: 700px; transform-origin: 0 0;
+  transition: transform .6s cubic-bezier(.3,.7,.2,1); }
+.scene { position: absolute; left: 0; top: 0; width: 1000px; height: 700px; display: block; }
+
+.cam { position: absolute; right: 8px; top: 8px; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; z-index: 5;
+  max-width: calc(100% - 120px); }
+.langsw { display: inline-flex; gap: 2px; padding: 2px; border-radius: 10px; background: rgba(0,0,0,.35); }
+.langsw button { padding: 3px 9px; }
+.cam button { border: 0; border-radius: 8px; padding: 5px 9px; font-size: 12.5px; cursor: pointer;
+  background: rgba(255,255,255,.14); color: #e9eef3; backdrop-filter: blur(4px); }
+.cam button.on { background: #e9eef3; color: #1a1f25; }
+.badge { position: absolute; left: 8px; top: 8px; z-index: 5; padding: 4px 10px; border-radius: 8px;
+  background: rgba(0,0,0,.45); color: #e9eef3; font-size: 12.5px; }
+.badge b { color: #ffd166; }
+.reginfo { position: absolute; left: 8px; bottom: 8px; z-index: 5; padding: 3px 9px; border-radius: 8px;
+  background: rgba(0,0,0,.45); color: #cfd8e0; font-size: 12px; }
+.toast { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); z-index: 6; max-width: calc(100% - 20px);
+  padding: 7px 12px; border-radius: 10px; background: rgba(10,14,18,.82); color: #fff; font-size: 13.5px;
+  text-align: center; opacity: 0; transition: opacity .15s; pointer-events: none; }
+.toast.show { opacity: 1; }
+
+/* ---------- Knob & valve in SVG ---------- */
+#knob, #valve { cursor: pointer; }
+#knobBody { transition: transform .18s ease-out; }
+#knobBody.pulled { transform: translateY(-9px); }
+#valveLever { transition: transform .25s ease-out; }
+
+/* ---------- Sensor DPS (design px, scaled with world) ---------- */
+.dps { position: absolute; left: 300px; top: 192px; width: 120px; height: 120px; border-radius: 9px;
+  background: linear-gradient(158deg, #f3f4f2 0%, #dadcd8 45%, #c3c7c3 100%);
+  box-shadow: 0 7px 12px rgba(0,0,0,.5), 0 2px 3px rgba(0,0,0,.35), inset 0 1px 0 #fff, inset 0 -2px 3px rgba(0,0,0,.18),
+    inset 2px 0 2px rgba(255,255,255,.6), inset -2px 0 3px rgba(0,0,0,.12);
+  transition: transform 70ms; touch-action: none; }
+.dps.pushing { transform: translateY(.5px); }
+.dps::before { content: ""; position: absolute; inset: 4px; border-radius: 7px;
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,.08), inset 0 1px 2px rgba(0,0,0,.12); pointer-events: none; }
+.dps-logo { position: absolute; left: 11px; top: 3.5px; font: italic 800 7px/1 "Arial Black", Arial, sans-serif;
+  letter-spacing: .3px; color: #9aa09c; text-shadow: 0 .5px 0 #fff; }
+.lcd { position: absolute; left: 9px; top: 13px; width: 102px; height: 67px; border-radius: 4px; overflow: hidden;
+  background: #040404; box-shadow: 0 0 0 1.6px #9da29e, 0 0 0 2.6px #e7e9e6, inset 0 2px 5px rgba(0,0,0,.9);
+  transition: filter .4s; }
+.lcd svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.lcd::after { content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(118deg, rgba(255,255,255,.13) 0%, rgba(255,255,255,.04) 30%, rgba(255,255,255,0) 31%, rgba(255,255,255,0) 100%); }
+.lcd.dim { filter: brightness(.32); }
+.lcd { --top: #8dff3c; }
+.lcd.c-red { --top: #ff3b2f; }
+.lcd.c-orange { --top: #ffae22; }
+.seg { fill: rgba(255,255,255,.055); }
+.row-top .seg.on { fill: var(--top); filter: drop-shadow(0 0 1.3px var(--top)); }
+.row-bot .seg.on { fill: #9cff52; filter: drop-shadow(0 0 1px #9cff52); }
+.bg-top { fill: url(#bgGreen); transition: fill .2s; }
+.lcd.c-red .bg-top { fill: url(#bgRed); }
+.lcd.c-orange .bg-top { fill: url(#bgOrange); }
+.bg-bot { fill: url(#bgBot); }
+.outlbl { font: 700 5.2px/1 Arial, sans-serif; fill: rgba(156,255,82,.22); }
+.outlbl.on { fill: #b6ff7a; filter: drop-shadow(0 0 1px #9cff52); }
+
+.keys { position: absolute; left: 0; right: 0; top: 85px; height: 30px; }
+.key { position: absolute; border: 0; padding: 0; cursor: pointer; touch-action: none; outline: none;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 60ms, box-shadow 60ms, filter 60ms; }
+.key.gray { top: 3px; width: 24px; height: 19px; border-radius: 5px;
+  background: linear-gradient(180deg, #d3d6d3 0%, #b7bbb8 60%, #a3a8a5 100%);
+  box-shadow: 0 1.6px 0 rgba(0,0,0,.35), 0 2.5px 3px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.75); }
+.key.up { left: 8px; } .key.down { right: 8px; }
+.key::after { content: ""; position: absolute; inset: -6px -4px; } /* area sentuh lebih besar di HP */
+.key svg { width: 12px; height: 12px; display: block; margin: auto; }
+.key.set { left: 35px; top: 1px; width: 50px; height: 22px; border-radius: 7px 7px 26px 26px / 7px 7px 15px 15px;
+  background: linear-gradient(180deg, #8cc0ff 0%, #4d92ea 48%, #2d6cc4 100%);
+  box-shadow: 0 1.8px 0 #1d4f95, 0 3px 4px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.65);
+  color: rgba(255,255,255,.75); font: 700 5.5px/22px Arial, sans-serif; letter-spacing: .6px; text-align: center; }
+.key.pressed { transform: translateY(1.1px) scale(.965);
+  box-shadow: inset 3px 0 4px rgba(0,0,0,.38), inset -3px 0 4px rgba(0,0,0,.38), inset 0 1.5px 3px rgba(0,0,0,.35); filter: brightness(.94); }
+.key.set.pressed { box-shadow: inset 3.5px 0 4px rgba(0,20,60,.5), inset -3.5px 0 4px rgba(0,20,60,.5), inset 0 2px 3px rgba(0,20,60,.45); }
+.key.bounce { animation: keyBounce .13s ease-out; }
+@keyframes keyBounce { 0% { transform: translateY(1.1px) scale(.965); } 65% { transform: translateY(-.35px) scale(1.005); } 100% { transform: none; } }
+.key:focus-visible { box-shadow: 0 0 0 1.5px #ffd166; }
+.hold-ring { position: absolute; left: 0; top: 0; width: 120px; height: 120px; pointer-events: none; overflow: visible; opacity: 0; transition: opacity .15s; }
+.hold-ring.show { opacity: 1; }
+
+/* ---------- Controls under stage ---------- */
+.controls { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-top: 10px; align-items: center; }
+.ctl-group { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.ctl-group > span { font-size: 12.5px; color: var(--muted); margin-right: 2px; }
+.btn { border: 1px solid var(--line); background: var(--card); border-radius: 9px; padding: 7px 11px; cursor: pointer;
+  min-height: 40px; font-size: 14px; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+.btn:hover { border-color: var(--line-hover); }
+.btn:active, .btn.active { background: var(--press); border-color: var(--accent); }
+.btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.btn.small { min-height: 34px; padding: 5px 9px; font-size: 13px; }
+.btn.combo, #knobMinus, #knobPlus { touch-action: none; -webkit-touch-callout: none; }
+.btn.on { background: var(--ok-bg); border-color: var(--ok); color: var(--ok-ink); }
+
+/* ---------- Sidebar cards ---------- */
+.side { display: grid; gap: 14px; min-width: 0; }
+.card { background: var(--card); border-radius: var(--radius); padding: 14px; box-shadow: 0 1px 3px rgba(0,0,0,.08); min-width: 0; }
+.card h2 { margin: 0 0 8px; font-size: 16px; }
+.card h2 small { font-weight: 400; color: var(--muted); font-size: 12.5px; }
+
+.pm-wires { display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: 12.5px; color: var(--muted); margin-bottom: 10px; }
+.pm-wires i { display: inline-block; width: 18px; height: 6px; border-radius: 3px; vertical-align: middle; margin-right: 4px;
+  box-shadow: 0 0 0 1px var(--line-hover); }
+.pm-lamps { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.lampbox { border: 1px solid var(--line); border-radius: 10px; padding: 10px; display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; align-items: center; }
+.lamp { grid-row: span 3; width: 34px; height: 34px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #6b7178, #2a2f35 70%);
+  box-shadow: inset 0 0 0 3px #c9ced3, 0 1px 2px rgba(0,0,0,.3); transition: background .1s, box-shadow .1s; }
+.lamp.l1.on { background: radial-gradient(circle at 35% 30%, #d8ffd9, #39d353 45%, #148a2c); box-shadow: inset 0 0 0 3px #c9ced3, 0 0 14px #39d353; }
+.lamp.l2.on { background: radial-gradient(circle at 35% 30%, #fff1cf, #ffad2e 45%, #c46b00); box-shadow: inset 0 0 0 3px #c9ced3, 0 0 14px #ffad2e; }
+.lampbox b { font-size: 14px; }
+.lampbox .st { font-size: 13px; font-weight: 600; }
+.lampbox .st.on { color: var(--ok); }
+.lampbox small { color: var(--muted); font-size: 12px; }
+.trend-wrap { margin-top: 10px; }
+#trend { width: 100%; height: 150px; display: block; border-radius: 8px; background: #11161b; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--muted); margin-top: 6px; }
+.legend i { display: inline-block; width: 14px; height: 3px; vertical-align: middle; margin-right: 4px; }
+
+.tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.tabs .btn { flex: 1 1 auto; }
+.tabs .btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.intro { color: var(--muted); font-size: 13.5px; margin: 0 0 8px; }
+.steps { list-style: none; padding: 0; margin: 0 0 10px; display: grid; gap: 6px; }
+.steps li { display: grid; grid-template-columns: 26px 1fr; gap: 8px; align-items: start; padding: 7px 8px; border-radius: 9px;
+  font-size: 14px; border: 1px solid transparent; }
+.steps li .n { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 700;
+  background: var(--chip); color: var(--muted); }
+.steps li.cur { border-color: var(--accent); background: var(--cur-bg); }
+.steps li.cur .n { background: var(--accent); color: #fff; }
+.steps li.done { color: var(--muted); }
+.steps li.done .n { background: var(--ok); color: #fff; }
+.finish { padding: 9px 11px; border-radius: 9px; background: var(--ok-bg); color: var(--ok-ink); font-weight: 600; margin-bottom: 10px; display: none; }
+.finish.show { display: block; }
+.row { display: flex; flex-wrap: wrap; gap: 6px; }
+.kbd { font-size: 12.5px; color: var(--muted); margin-top: 8px; }
+kbd { border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; font-size: 11.5px; background: var(--kbd-bg); }
+table.codes { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.codes td { padding: 4px 6px; border-top: 1px solid var(--line); vertical-align: top; }
+table.codes td:first-child { font-family: Consolas, "Courier New", monospace; font-weight: 700; white-space: nowrap; }
+details.card summary { cursor: pointer; font-weight: 700; font-size: 16px; }
+</style>
+</head>
+<body>
+<header class="top">
+  <h1 data-i18n="header.title">Simulator Pressure Sensor AirTAC DPS</h1>
+  <p data-i18n="header.sub">DPSN1-10 terpasang di FRL AirTAC GFC300-10 · latihan reset pabrik &amp; setting tekanan · simulator latihan independen, bukan aplikasi resmi AirTAC</p>
+</header>
+
+<main class="layout">
+  <section class="stage-col">
+    <div class="stage" id="stage">
+      <div class="world" id="world">
+        <svg class="scene" viewBox="0 0 1000 700" aria-label="FRL AirTAC dengan sensor DPS">
+          <defs>
+            <linearGradient id="plate" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#39424b"/><stop offset="1" stop-color="#1c2228"/>
+            </linearGradient>
+            <pattern id="perf" width="22" height="22" patternUnits="userSpaceOnUse">
+              <circle cx="11" cy="11" r="3.2" fill="#12171b" opacity=".55"/>
+              <circle cx="11" cy="10.2" r="3.2" fill="none" stroke="#5a646e" stroke-width=".6" opacity=".35"/>
+            </pattern>
+            <linearGradient id="metal" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0" stop-color="#7e868e"/><stop offset=".16" stop-color="#d9dee3"/>
+              <stop offset=".3" stop-color="#f6f8fa"/><stop offset=".55" stop-color="#c3c9cf"/>
+              <stop offset=".82" stop-color="#99a1a9"/><stop offset="1" stop-color="#727a82"/>
+            </linearGradient>
+            <linearGradient id="metalV" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#eef1f4"/><stop offset=".5" stop-color="#b9c0c7"/><stop offset="1" stop-color="#7f878f"/>
+            </linearGradient>
+            <linearGradient id="knobG" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0" stop-color="#040404"/><stop offset=".22" stop-color="#2a2a2a"/>
+              <stop offset=".38" stop-color="#4a4a4a"/><stop offset=".6" stop-color="#1b1b1b"/><stop offset="1" stop-color="#000"/>
+            </linearGradient>
+            <linearGradient id="guard" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0" stop-color="#7f878e"/><stop offset=".22" stop-color="#c6ccd1"/>
+              <stop offset=".42" stop-color="#e8ebee"/><stop offset=".7" stop-color="#aab1b7"/><stop offset="1" stop-color="#7a8289"/>
+            </linearGradient>
+            <linearGradient id="bowl" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0" stop-color="#9fb8c8" stop-opacity=".55"/><stop offset=".3" stop-color="#e9f4fb" stop-opacity=".35"/>
+              <stop offset=".55" stop-color="#bcd3e1" stop-opacity=".25"/><stop offset="1" stop-color="#7f99aa" stop-opacity=".55"/>
+            </linearGradient>
+            <linearGradient id="oil" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0" stop-color="#a9670f"/><stop offset=".35" stop-color="#e9b24a"/><stop offset="1" stop-color="#9a5c0c"/>
+            </linearGradient>
+            <linearGradient id="element" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0" stop-color="#b7b9b4"/><stop offset=".4" stop-color="#f1f1ec"/><stop offset="1" stop-color="#a9aba6"/>
+            </linearGradient>
+            <linearGradient id="hose" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#5aa0ec"/><stop offset=".45" stop-color="#2a6fc4"/><stop offset="1" stop-color="#174a8a"/>
+            </linearGradient>
+            <linearGradient id="brass" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#f1d58a"/><stop offset=".5" stop-color="#c49a3a"/><stop offset="1" stop-color="#8a6a20"/>
+            </linearGradient>
+            <linearGradient id="panelG" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#e3e6e9"/><stop offset="1" stop-color="#c3c8cd"/>
+            </linearGradient>
+            <radialGradient id="lampOff" cx=".35" cy=".3" r=".75">
+              <stop offset="0" stop-color="#6d737a"/><stop offset="1" stop-color="#23282d"/>
+            </radialGradient>
+            <radialGradient id="lampG" cx=".35" cy=".3" r=".75">
+              <stop offset="0" stop-color="#e3ffe4"/><stop offset=".45" stop-color="#3bd556"/><stop offset="1" stop-color="#127a27"/>
+            </radialGradient>
+            <radialGradient id="lampO" cx=".35" cy=".3" r=".75">
+              <stop offset="0" stop-color="#fff3d6"/><stop offset=".45" stop-color="#ffad2e"/><stop offset="1" stop-color="#b86200"/>
+            </radialGradient>
+            <filter id="soft" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="6"/></filter>
+            <filter id="glow" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="9"/></filter>
+            <clipPath id="knobClip"><rect x="312" y="58" width="96" height="92" rx="9"/></clipPath>
+          </defs>
+
+          <!-- mounting plate -->
+          <rect width="1000" height="700" fill="url(#plate)"/>
+          <rect width="1000" height="700" fill="url(#perf)" opacity=".7"/>
+          <rect x="0" y="640" width="1000" height="60" fill="#14191e" opacity=".55"/>
+
+          <!-- supply hose + ball valve -->
+          <path d="M-20 255 H160" stroke="url(#hose)" stroke-width="24" fill="none"/>
+          <path d="M-20 249 H160" stroke="#9cc8f5" stroke-width="3" opacity=".45" fill="none"/>
+          <text x="20" y="226" fill="#c9d3dc" font-size="15" font-family="Segoe UI, Microsoft YaHei, Arial" data-i18n="scene.supply">Suplai 0.9 MPa</text>
+          <g id="valve">
+            <rect x="152" y="232" width="96" height="46" rx="8" fill="url(#brass)"/>
+            <rect x="152" y="232" width="96" height="46" rx="8" fill="none" stroke="#6b5216" stroke-width="1.5"/>
+            <rect x="186" y="220" width="28" height="18" rx="3" fill="url(#metalV)"/>
+            <g id="valveLever" style="transform-origin: 200px 222px">
+              <rect x="196" y="214" width="96" height="16" rx="6" fill="#c62e2e"/>
+              <rect x="196" y="214" width="96" height="5" rx="3" fill="#ff7b6b" opacity=".6"/>
+            </g>
+            <circle cx="200" cy="222" r="9" fill="url(#metalV)" stroke="#555" stroke-width="1"/>
+            <text id="valveTxt" x="200" y="306" text-anchor="middle" fill="#c9d3dc" font-size="14" font-family="Segoe UI, Arial">Katup: BUKA</text>
+          </g>
+          <rect x="246" y="238" width="28" height="34" rx="4" fill="url(#metalV)"/>
+
+          <!-- FR unit: bowl guard + bowl -->
+          <path d="M285 338 H435 L428 560 Q426 600 398 604 H322 Q294 600 292 560 Z" fill="url(#guard)"/>
+          <rect x="322" y="356" width="76" height="214" rx="30" fill="#11161b" opacity=".85"/>
+          <rect x="322" y="356" width="76" height="214" rx="30" fill="url(#bowl)"/>
+          <rect x="336" y="364" width="48" height="120" rx="6" fill="url(#element)"/>
+          <g stroke="#9a9c97" stroke-width="1" opacity=".6">
+            <line x1="336" y1="380" x2="384" y2="380"/><line x1="336" y1="400" x2="384" y2="400"/>
+            <line x1="336" y1="420" x2="384" y2="420"/><line x1="336" y1="440" x2="384" y2="440"/><line x1="336" y1="460" x2="384" y2="460"/>
+          </g>
+          <path d="M324 540 H396 V548 Q396 568 370 568 H350 Q324 568 324 548 Z" fill="#8fc6e6" opacity=".45"/>
+          <rect x="327" y="360" width="8" height="200" rx="4" fill="#fff" opacity=".18"/>
+          <rect x="278" y="330" width="164" height="18" rx="5" fill="#5f676f"/>
+          <rect x="278" y="330" width="164" height="5" rx="3" fill="#a3abb3" opacity=".7"/>
+          <rect x="344" y="602" width="32" height="26" rx="5" fill="#1d2125"/>
+          <rect x="350" y="626" width="20" height="10" rx="3" fill="#2d3237"/>
+
+          <!-- FR body + bonnet -->
+          <rect x="258" y="228" width="20" height="54" rx="4" fill="url(#metalV)"/>
+          <rect x="268" y="180" width="184" height="152" rx="11" fill="url(#metal)"/>
+          <rect x="268" y="180" width="184" height="152" rx="11" fill="none" stroke="#5c646c" stroke-width="1.5"/>
+          <path d="M298 150 H422 L434 182 H286 Z" fill="url(#metal)"/>
+          <path d="M298 150 H422 L434 182 H286 Z" fill="none" stroke="#5c646c" stroke-width="1"/>
+          <rect x="318" y="140" width="84" height="12" rx="3" fill="#f07c13"/>
+          <!-- knob -->
+          <g id="knob">
+            <g id="knobBody">
+              <rect x="312" y="58" width="96" height="92" rx="9" fill="url(#knobG)"/>
+              <g clip-path="url(#knobClip)">
+                <g id="knobRidges" stroke="#000" stroke-width="2.4" opacity=".75"></g>
+                <rect x="312" y="58" width="96" height="92" fill="url(#knobG)" opacity=".35"/>
+              </g>
+              <rect x="316" y="60" width="88" height="6" rx="3" fill="#5a5a5a" opacity=".55"/>
+              <text x="360" y="54" text-anchor="middle" fill="#c9d3dc" font-size="12" font-family="Segoe UI, Arial">− ↺   ↻ +</text>
+            </g>
+          </g>
+          <!-- shadow under sensor -->
+          <rect x="302" y="200" width="120" height="120" rx="10" fill="#000" opacity=".45" filter="url(#soft)"/>
+
+          <!-- joint -->
+          <rect x="448" y="214" width="26" height="82" rx="4" fill="url(#metalV)"/>
+          <rect x="448" y="214" width="26" height="82" rx="4" fill="none" stroke="#5c646c"/>
+
+          <!-- Lubricator -->
+          <path d="M488 338 H612 L606 560 Q604 600 578 604 H522 Q496 600 494 560 Z" fill="url(#guard)"/>
+          <rect x="516" y="356" width="68" height="214" rx="28" fill="#11161b" opacity=".85"/>
+          <rect x="516" y="356" width="68" height="214" rx="28" fill="url(#bowl)"/>
+          <path d="M518 430 H582 V540 Q582 568 556 568 H544 Q518 568 518 540 Z" fill="url(#oil)" opacity=".85"/>
+          <rect x="518" y="428" width="64" height="4" fill="#ffd77a" opacity=".7"/>
+          <line x1="550" y1="360" x2="550" y2="556" stroke="#d7dde2" stroke-width="3" opacity=".5"/>
+          <rect x="521" y="360" width="7" height="200" rx="3" fill="#fff" opacity=".18"/>
+          <rect x="482" y="330" width="136" height="18" rx="5" fill="#5f676f"/>
+          <rect x="482" y="330" width="136" height="5" rx="3" fill="#a3abb3" opacity=".7"/>
+          <rect x="538" y="602" width="24" height="24" rx="5" fill="#1d2125"/>
+          <rect x="472" y="180" width="156" height="152" rx="11" fill="url(#metal)"/>
+          <rect x="472" y="180" width="156" height="152" rx="11" fill="none" stroke="#5c646c" stroke-width="1.5"/>
+          <path d="M518 182 Q518 132 550 130 Q582 132 582 182 Z" fill="#cfe6f3" opacity=".55" stroke="#8aa3b3"/>
+          <line x1="550" y1="138" x2="550" y2="166" stroke="#7d93a2" stroke-width="3"/>
+          <circle cx="550" cy="170" r="3" fill="#e9b24a"/>
+          <rect x="540" y="108" width="20" height="24" rx="3" fill="#202428"/>
+          <rect x="534" y="104" width="32" height="8" rx="3" fill="#2f3439"/>
+          <text x="550" y="242" text-anchor="middle" fill="#1d3f68" font-size="25" font-weight="800" font-style="italic" font-family="Arial Black, Arial">AirTAC</text>
+          <text x="550" y="266" text-anchor="middle" fill="#3b4652" font-size="13" font-family="Arial">GFC300-10</text>
+          <rect x="520" y="284" width="60" height="20" rx="4" fill="#2b3238" opacity=".8"/>
+          <text x="550" y="298" text-anchor="middle" fill="#dfe6ec" font-size="11" font-family="Arial">LUB</text>
+
+          <!-- outlet -->
+          <rect x="626" y="234" width="30" height="42" rx="5" fill="url(#metalV)"/>
+          <rect x="652" y="240" width="18" height="30" rx="4" fill="#2a6fc4"/>
+          <path d="M668 255 C720 255 720 300 720 380 V720" stroke="url(#hose)" stroke-width="24" fill="none"/>
+          <path d="M668 249 C714 249 713 300 713 380 V720" stroke="#9cc8f5" stroke-width="3" opacity=".4" fill="none"/>
+          <text x="738" y="620" fill="#c9d3dc" font-size="15" font-family="Segoe UI, Arial" data-i18n="scene.tomachine">→ ke mesin</text>
+
+          <!-- sensor cable to panel -->
+          <path d="M398 204 C430 120 560 70 700 96 C760 108 790 140 800 160" stroke="#3e4348" stroke-width="11" fill="none" stroke-linecap="round"/>
+          <path d="M398 204 C430 120 560 70 700 96 C760 108 790 140 800 160" stroke="#8a9096" stroke-width="2.4" opacity=".55" fill="none" transform="translate(-2,-3)"/>
+
+          <!-- panel monitor -->
+          <g id="scenePanel">
+            <rect x="760" y="150" width="226" height="380" rx="12" fill="url(#panelG)" stroke="#8c949b" stroke-width="2"/>
+            <rect x="760" y="150" width="226" height="34" rx="12" fill="#2f3b47"/>
+            <rect x="760" y="172" width="226" height="12" fill="#2f3b47"/>
+            <text x="873" y="173" text-anchor="middle" fill="#e9eef3" font-size="14" font-weight="700" font-family="Segoe UI, Arial" data-i18n="scene.panel">PANEL MONITOR 24 VDC</text>
+            <!-- wires fan -->
+            <path d="M800 160 C800 200 790 205 790 222" stroke="#7a4a22" stroke-width="5" fill="none"/>
+            <path d="M800 160 C808 200 838 205 840 222" stroke="#1b1b1b" stroke-width="5" fill="none"/>
+            <path d="M800 160 C816 196 886 200 890 222" stroke="#f1f1f1" stroke-width="5" fill="none"/>
+            <path d="M800 160 C822 192 936 196 940 222" stroke="#2a62c9" stroke-width="5" fill="none"/>
+            <g font-family="Segoe UI, Arial" font-size="12" fill="#2b3640" text-anchor="middle">
+              <rect x="776" y="220" width="182" height="34" rx="4" fill="#3b444c"/>
+              <circle cx="790" cy="237" r="9" fill="url(#metalV)"/><circle cx="840" cy="237" r="9" fill="url(#metalV)"/>
+              <circle cx="890" cy="237" r="9" fill="url(#metalV)"/><circle cx="940" cy="237" r="9" fill="url(#metalV)"/>
+              <text x="790" y="272">+24V</text><text x="840" y="272">OUT1</text><text x="890" y="272">OUT2</text><text x="940" y="272">0V</text>
+            </g>
+            <circle id="sPwr" cx="960" cy="300" r="7" fill="#43d35a"/>
+            <text x="948" y="304" text-anchor="end" fill="#2b3640" font-size="12" font-family="Segoe UI, Arial">PWR</text>
+            <circle cx="815" cy="370" r="40" fill="#9aa1a8"/>
+            <circle id="sL1glow" cx="815" cy="370" r="44" fill="#3bd556" opacity="0" filter="url(#glow)"/>
+            <circle id="sL1" cx="815" cy="370" r="33" fill="url(#lampOff)"/>
+            <circle cx="930" cy="370" r="40" fill="#9aa1a8"/>
+            <circle id="sL2glow" cx="930" cy="370" r="44" fill="#ffad2e" opacity="0" filter="url(#glow)"/>
+            <circle id="sL2" cx="930" cy="370" r="33" fill="url(#lampOff)"/>
+            <g font-family="Segoe UI, Arial" text-anchor="middle" fill="#1f2a33">
+              <text x="815" y="434" font-size="17" font-weight="700">OUT1</text>
+              <text x="930" y="434" font-size="17" font-weight="700">OUT2</text>
+              <text id="sS1" x="815" y="456" font-size="14">N.O. · ON</text>
+              <text id="sS2" x="930" y="456" font-size="14">N.O. · ON</text>
+              <text id="sM1" x="815" y="478" font-size="12" fill="#4b5763">Window</text>
+              <text id="sM2" x="930" y="478" font-size="12" fill="#4b5763">Basic</text>
+            </g>
+          </g>
+        </svg>
+
+        <!-- Sensor DPS -->
+        <div class="dps" id="dps">
+          <div class="dps-logo">AirTAC</div>
+          <div class="lcd" id="lcd"></div>
+          <div class="keys">
+            <button class="key gray up" data-btn="up" aria-label="Tombol ▲ (naik)">
+              <svg viewBox="0 0 12 12"><path d="M6 1.5 L9 5 H3 Z" fill="#3c4144"/><rect x="2.5" y="6.5" width="7" height="1.2" fill="#3c4144"/><rect x="2.5" y="8.8" width="7" height="1.2" fill="#3c4144"/></svg>
+            </button>
+            <button class="key set" data-btn="set" aria-label="Tombol SET">SET</button>
+            <button class="key gray down" data-btn="down" aria-label="Tombol ▼ (turun)">
+              <svg viewBox="0 0 12 12"><rect x="2.5" y="2" width="7" height="1.2" fill="#3c4144"/><rect x="2.5" y="4.3" width="7" height="1.2" fill="#3c4144"/><path d="M6 10.5 L9 7 H3 Z" fill="#3c4144"/></svg>
+            </button>
+          </div>
+          <svg class="hold-ring" id="holdRing" viewBox="0 0 120 120">
+            <circle cx="60" cy="97" r="31" fill="none" stroke="rgba(0,0,0,.25)" stroke-width="3"/>
+            <circle id="holdArc" cx="60" cy="97" r="31" fill="none" stroke="#ffd166" stroke-width="3" stroke-linecap="round"
+                    transform="rotate(-90 60 97)" stroke-dasharray="194.8" stroke-dashoffset="194.8"/>
+            <g id="holdMarks"></g>
+          </svg>
+        </div>
+      </div>
+
+      <div class="badge" id="badge">Layar ukur</div>
+      <div class="reginfo" id="regInfo"></div>
+      <div class="cam" id="cam">
+        <span class="langsw" role="group" aria-label="Bahasa / 语言">
+          <button data-lang="id" lang="id">ID</button><button data-lang="zh" lang="zh-CN">中文</button>
+        </span>
+        <button data-cam="close" data-i18n="cam.close">Sensor</button>
+        <button data-cam="sensor" data-i18n="cam.sensor">Sensor + FRL</button>
+        <button data-cam="all" data-i18n="cam.all">Semua</button>
+      </div>
+      <div class="toast" id="toast"></div>
+    </div>
+
+    <div class="controls">
+      <div class="ctl-group">
+        <span data-i18n="ctl.reg">Regulator</span>
+        <button class="btn small" id="knobPull">Tarik knob</button>
+        <button class="btn small" id="knobMinus" aria-label="Putar knob turun" data-i18n="knob.minus">− turun</button>
+        <button class="btn small" id="knobPlus" aria-label="Putar knob naik" data-i18n="knob.plus">+ naik</button>
+        <button class="btn small on" id="valveBtn">Katup suplai: BUKA</button>
+      </div>
+      <div class="ctl-group">
+        <span data-i18n="ctl.combo">Tekan bersamaan (tahan 1 dtk)</span>
+        <button class="btn small combo" data-combo="up,down" data-i18n="combo.zero">▲+▼ zero</button>
+        <button class="btn small combo" data-combo="up,set" data-i18n="combo.lock">▲+SET kunci</button>
+        <button class="btn small combo" data-combo="down,set" data-i18n="combo.unlock">▼+SET buka</button>
+      </div>
+    </div>
+  </section>
+
+  <aside class="side">
+    <section class="card">
+      <h2><span data-i18n="panel.h">Panel Monitor Output</span> <small data-i18n="panel.hs">· kabel dari soket sensor</small></h2>
+      <div class="pm-wires">
+        <span><i style="background:#7a4a22"></i><b data-i18n="wire.brown" style="font-weight:400">coklat +24V</b></span>
+        <span><i style="background:#1b1b1b"></i><b data-i18n="wire.black" style="font-weight:400">hitam OUT1</b></span>
+        <span><i style="background:#f4f4f4"></i><b data-i18n="wire.white" style="font-weight:400">putih OUT2</b></span>
+        <span><i style="background:#2a62c9"></i><b data-i18n="wire.blue" style="font-weight:400">biru 0V</b></span>
+      </div>
+      <div class="pm-lamps">
+        <div class="lampbox"><div class="lamp l1" id="pL1"></div><b>OUT1</b><span class="st" id="pS1">–</span><small id="pM1">–</small></div>
+        <div class="lampbox"><div class="lamp l2" id="pL2"></div><b>OUT2</b><span class="st" id="pS2">–</span><small id="pM2">–</small></div>
+      </div>
+      <div class="trend-wrap">
+        <canvas id="trend"></canvas>
+        <div class="legend">
+          <span><i style="background:#e9eef3"></i><b data-i18n="legend.p" style="font-weight:400">tekanan</b></span>
+          <span><i style="background:#31c24a"></i><b data-i18n="legend.o1" style="font-weight:400">setting OUT1</b></span>
+          <span><i style="background:#f29a1a"></i><b data-i18n="legend.o2" style="font-weight:400">setting OUT2</b></span>
+          <span id="trendScale">0–0.900 MPa · 30 dtk</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2 data-i18n="lesson.h">Latihan</h2>
+      <div class="tabs" id="tabs"></div>
+      <p class="intro" id="intro"></p>
+      <div class="finish" id="finish" data-i18n="lesson.finish">Selesai! Semua langkah benar ✔</div>
+      <ol class="steps" id="steps"></ol>
+      <div class="row">
+        <button class="btn primary" id="startEp">Mulai episode ini</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2 data-i18n="ctl.h">Kontrol simulator</h2>
+      <div class="row">
+        <button class="btn" id="loadMachine" data-i18n="ctl.machine">Muat setting mesin</button>
+        <button class="btn" id="loadFactory" data-i18n="ctl.factory">Mulai dari pabrik</button>
+        <button class="btn on" id="soundBtn">Suara: ON</button>
+      </div>
+      <p class="kbd" data-i18n-html="kbd"></p>
+    </section>
+
+    <details class="card">
+      <summary data-i18n="codes.h">Arti kode di LCD</summary>
+      <table class="codes" id="codes"></table>
+    </details>
+  </aside>
+</main>
+
+<script>/* Seg7: peta karakter -> segmen untuk LCD 7-segmen DPS.
+   Bit: a=1 (atas), b=2 (kanan atas), c=4 (kanan bawah), d=8 (bawah),
+        e=16 (kiri bawah), f=32 (kiri atas), g=64 (tengah). */
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory();
+  else root.Seg7 = factory();
+})(typeof self !== 'undefined' ? self : this, function () {
+  const CHARS = {
+    ' ': 0, '-': 64,
+    '0': 63, '1': 6, '2': 91, '3': 79, '4': 102, '5': 109, '6': 125, '7': 7, '8': 127, '9': 111,
+    A: 119, b: 124, C: 57, c: 88, d: 94, E: 121, F: 113, G: 61, g: 111,
+    H: 118, h: 116, I: 48, i: 16, j: 14, K: 117, k: 117, L: 56,
+    M: 85, /* "n" bergaris atas, seperti nPA di manual */
+    n: 84, o: 92, P: 115, r: 80, S: 109, t: 120, U: 62, u: 28, y: 110, Y: 110,
+  };
+
+  function parse(text) {
+    const out = [];
+    let lead = false;
+    for (const ch of String(text)) {
+      if (ch === '.') {
+        if (out.length) out[out.length - 1].dp = true;
+        else lead = true;
+        continue;
+      }
+      if (!(ch in CHARS)) throw new Error('Seg7: karakter tidak dikenal "' + ch + '" di "' + text + '"');
+      out.push({ segs: CHARS[ch], dp: false });
+    }
+    return { digits: out, lead };
+  }
+
+  function encode(text, digits) {
+    const { digits: d } = parse(text);
+    if (d.length > digits) throw new Error('Seg7: "' + text + '" lebih dari ' + digits + ' digit');
+    const pad = [];
+    for (let i = d.length; i < digits; i++) pad.push({ segs: 0, dp: false });
+    return pad.concat(d);
+  }
+
+  function leadingDot(text) { return parse(text).lead; }
+
+  return { CHARS, encode, leadingDot };
+});
+</script>
+<script>/* DPSCore: mesin-status pressure sensor AirTAC DPSN1-10 (tanpa DOM).
+   Waktu dimasukkan dari luar (ms). Tekanan dalam kPa bilangan bulat.
+   Sumber perilaku: katalog AirTAC DPS hal. 214-215 + desain-tutorial-dps-reset-setting.md */
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory();
+  else root.DPSCore = factory();
+})(typeof self !== 'undefined' ? self : this, function () {
+  'use strict';
+
+  // Urutan = diagram manual kiri -> kanan. Pilihan pertama = default pabrik.
+  const OPTIONS = {
+    ot1: ['EASY', 'HYS', 'uCnP'],
+    ot2: ['EASY', 'HYS', 'uCnP'],
+    noc: ['1o2o', '1C2o', '1o2C', '1C2C'],
+    spd: [2, 20, 50, 100, 250, 500, 1000, 2500, 5000],
+    clr: ['r-on', 'G-on', 'rEd', 'GrEn'],
+    unt: ['MPA', 'kPA', 'kgF', 'bAr', 'PSI', 'cMHg', 'inHg'],
+    sub: ['Std', 'oFF', 'Unit'],
+    dsp: [100, 250, 500, 1000],
+    hys: [1, 2, 3, 4, 5, 6, 7, 8],
+    pus: ['oFF', 'on'],
+    dpy: ['oUt1', 'oUt2', 'And', 'or'],
+    cpy: ['oFF', 'CP-S', 'CP-M'],
+    rst: ['oFF', 'on'],
+  };
+  const LABEL = {
+    ot1: 'ot1', ot2: 'ot2', noc: 'noC', spd: 'SPd', clr: 'CLr', unt: 'Unt',
+    sub: 'Sub', dsp: 'dSP', hys: 'HYS', pus: 'PuS', dpy: 'dPY', cpy: 'CPY', rst: 'rSt',
+  };
+  const BASIC_MENU = ['ot1', 'ot2', 'noc', 'spd', 'clr', 'unt'];
+  const PRO_MENU = ['sub', 'dsp', 'hys', 'pus', 'dpy', 'cpy', 'rst'];
+  const ITEM_LABEL = { p1: '1-P', h1: '1-H', l1: '1-L', p2: '2-P', h2: '2-H', l2: '2-L' };
+
+  const DEFAULTS = { p1: 0, h1: 0, l1: 0, p2: 0, h2: 0, l2: 0 };
+  for (const k of Object.keys(OPTIONS)) DEFAULTS[k] = OPTIONS[k][0];
+  const ORDERED_DEFAULTS = {};
+  for (const k of ['ot1', 'ot2', 'noc', 'spd', 'clr', 'unt', 'sub', 'dsp', 'hys', 'pus', 'dpy', 'cpy', 'rst',
+    'p1', 'h1', 'l1', 'p2', 'h2', 'l2']) ORDERED_DEFAULTS[k] = DEFAULTS[k];
+  Object.freeze(ORDERED_DEFAULTS);
+  const MACHINE = Object.freeze(Object.assign({}, ORDERED_DEFAULTS,
+    { ot1: 'uCnP', clr: 'G-on', h1: 660, l1: 450, p2: 450 }));
+
+  const T = {
+    BASIC_MS: 2000, PRO_MS: 4000, EXIT_MS: 2000,
+    REPEAT_START: 500, REPEAT_EVERY: 80, FAST_AFTER: 2000, FAST_STEP: 10,
+    ROLL_PHASE: 600, FOCUS_MS: 3000, COMBO_MS: 1000, MSG_MS: 1000,
+    DIM_AFTER: 30000, ZERO_LIMIT: 70, MIN: -100, MAX: 1000,
+  };
+
+  const ALL_LABELS = (function () {
+    const s = new Set(['Pro', 'SEt', 'LoCK', 'on', 'oFF', 'LCK', '0000', 'Adj', 'Err']);
+    for (const k of Object.keys(OPTIONS)) { s.add(LABEL[k]); for (const v of OPTIONS[k]) s.add(String(v)); }
+    for (const v of Object.values(ITEM_LABEL)) s.add(v);
+    return Array.from(s);
+  })();
+
+  function items(st) {
+    const a = st.ot1 === 'EASY' ? ['p1'] : ['h1', 'l1'];
+    const b = st.ot2 === 'EASY' ? ['p2'] : ['h2', 'l2'];
+    return a.concat(b);
+  }
+
+  // Format nilai kPa ke teks LCD dalam satuan aktif. row: 'top' | 'bottom'.
+  function format(kpa, unit, row) {
+    const neg = kpa < 0, a = Math.abs(kpa);
+    let s;
+    switch (unit) {
+      case 'MPA': {
+        s = (a / 1000).toFixed(3);
+        if (s.startsWith('0') && (row === 'bottom' || neg)) s = s.slice(1);
+        break;
+      }
+      case 'kPA': s = String(Math.round(a)); break;
+      case 'kgF': s = (a * 0.0101972).toFixed(2); break;
+      case 'bAr': s = (a / 100).toFixed(2); break;
+      case 'PSI': s = (a * 0.145038).toFixed(1); break;
+      case 'cMHg': s = String(Math.round(a * 0.750062)); break;
+      case 'inHg': s = (a * 0.2953).toFixed(1); break;
+      default: s = String(a);
+    }
+    return (neg && Number(s.replace('.', '')) !== 0 ? '-' : '') + s;
+  }
+
+  function logic(mode, P, set, h, prev) {
+    if (mode === 'EASY') return P > set.p + h ? true : P < set.p ? false : prev;
+    if (mode === 'HYS') return P > set.h ? true : P < set.l ? false : prev;
+    // uCnP (window): masuk jika L <= P <= H, keluar jika lewat batas +/- hysteresis
+    if (prev) return !(P > set.h + h || P < set.l - h);
+    return P >= set.l && P <= set.h;
+  }
+
+  function create(opts) {
+    opts = opts || {};
+    const base = opts.preset === 'machine' ? MACHINE : ORDERED_DEFAULTS;
+    const d = {
+      settings: null, mode: 'measure', locked: false,
+      _now: 0, _sel: 0, _bIdx: 0, _pIdx: -1, _fresh: true,
+      _held: {}, _combo: null, _focusUntil: 0, _rollStart: null, _msg: null,
+      _zero: 0, _raw: 0, _shownP: 0, _shownAt: -Infinity, _lastAct: 0,
+      _logic: [false, false], _out: [false, false], _pend: [null, null], _init: false,
+    };
+    d.settings = Object.assign({}, base, opts.settings || {});
+
+    function msg(top, bottom, ms) { d._msg = { top, bottom, until: d._now + (ms || T.MSG_MS) }; }
+    function curItems() { return items(d.settings); }
+    function selKey() { const it = curItems(); if (d._sel >= it.length) d._sel = 0; return it[d._sel]; }
+    function focused() { return d._now < d._focusUntil; }
+    function cycleOpt(key, dir) {
+      const o = OPTIONS[key]; const i = o.indexOf(d.settings[key]);
+      d.settings[key] = o[(i + dir + o.length) % o.length];
+    }
+    function stepValue(dir, size) {
+      const k = selKey();
+      d.settings[k] = Math.max(T.MIN, Math.min(T.MAX, d.settings[k] + dir * size));
+      d._rollStart = null;
+      d._focusUntil = d._now + T.FOCUS_MS;
+    }
+    function toMeasure(resetSel) {
+      d.mode = 'measure';
+      d._focusUntil = 0; d._rollStart = null; d._fresh = true;
+      if (resetSel) d._sel = 0;
+    }
+    function factoryReset() {
+      d.settings = Object.assign({}, ORDERED_DEFAULTS);
+      d._zero = 0; d._sel = 0;
+    }
+
+    d.loadPreset = function (name) {
+      d.settings = Object.assign({}, name === 'machine' ? MACHINE : ORDERED_DEFAULTS);
+      d.locked = false; d._zero = 0; d._msg = null; d._combo = null; d._held = {};
+      d._init = false; d._shownAt = -Infinity;
+      toMeasure(true);
+    };
+
+    d.press = function (btn, t) {
+      d._now = t;
+      const wasDim = d.view().dim;
+      d._lastAct = t;
+      const others = Object.keys(d._held);
+      const h = { start: t, consumed: false, nextRep: t + T.REPEAT_START, repeated: false };
+      d._held[btn] = h;
+      if (wasDim) { h.consumed = true; return; }
+      if (others.length) {
+        d._combo = { keys: others.concat(btn).sort().join('+'), start: t, done: false };
+        for (const k of Object.keys(d._held)) d._held[k].consumed = true;
+        return;
+      }
+      if (d.locked) { h.consumed = true; msg(undefined, 'LCK'); }
+    };
+
+    d.release = function (btn, t) {
+      d._now = t;
+      const h = d._held[btn];
+      delete d._held[btn];
+      if (!Object.keys(d._held).length) d._combo = null;
+      if (!h || h.consumed) return;
+      const dur = t - h.start;
+      if (d.mode === 'measure') {
+        if (btn === 'set') {
+          if (dur >= T.BASIC_MS) { d.mode = 'basic'; d._bIdx = 0; return; }
+          // SET pertama setelah masuk layar ukur menampilkan item saat ini; SET berikutnya pindah item.
+          if (d._fresh) d._fresh = false;
+          else d._sel = (d._sel + 1) % curItems().length;
+          d._rollStart = t;
+          d._focusUntil = t + T.FOCUS_MS;
+        } else if (!h.repeated) {
+          stepValue(btn === 'up' ? 1 : -1, 1);
+        }
+      } else if (d.mode === 'basic') {
+        if (btn === 'set') d._bIdx = (d._bIdx + 1) % BASIC_MENU.length;
+        else cycleOpt(BASIC_MENU[d._bIdx], btn === 'up' ? 1 : -1);
+      } else if (d.mode === 'pro') {
+        if (btn === 'set') d._pIdx = d._pIdx + 1 >= PRO_MENU.length ? -1 : d._pIdx + 1;
+        else if (d._pIdx >= 0) cycleOpt(PRO_MENU[d._pIdx], btn === 'up' ? 1 : -1);
+      }
+    };
+
+    function handleHolds(t) {
+      if (d._combo) {
+        const c = d._combo;
+        if (!c.done && t - c.start >= T.COMBO_MS && d.mode === 'measure') {
+          c.done = true;
+          if (c.keys === 'set+up') { d.locked = true; msg('LoCK', 'on'); }
+          else if (c.keys === 'down+set') { d.locked = false; msg('LoCK', 'oFF'); }
+          else if (c.keys === 'down+up' && !d.locked) {
+            if (Math.abs(d._raw) <= T.ZERO_LIMIT) { d._zero = d._raw; d._shownAt = -Infinity; msg('0000', 'Adj'); }
+            else msg('Err', '');
+          }
+        }
+        return;
+      }
+      const s = d._held.set;
+      if (s && !s.consumed) {
+        const dur = t - s.start;
+        if (d.mode === 'measure' && dur >= T.PRO_MS) { s.consumed = true; d.mode = 'pro'; d._pIdx = -1; }
+        else if (d.mode === 'basic' && dur >= T.EXIT_MS) { s.consumed = true; toMeasure(true); }
+        else if (d.mode === 'pro' && dur >= T.EXIT_MS) {
+          s.consumed = true;
+          const reset = d.settings.rst === 'on';
+          if (reset) factoryReset();
+          toMeasure(reset);
+        }
+      }
+      if (d.mode === 'measure') {
+        for (const btn of ['up', 'down']) {
+          const h = d._held[btn];
+          if (!h || h.consumed) continue;
+          while (t >= h.nextRep) {
+            h.repeated = true;
+            const size = h.nextRep - h.start >= T.FAST_AFTER ? T.FAST_STEP : 1;
+            stepValue(btn === 'up' ? 1 : -1, size);
+            h.nextRep += T.REPEAT_EVERY;
+          }
+        }
+      }
+    }
+
+    function updateOutputs(t, P) {
+      const st = d.settings, hy = st.hys;
+      const sets = [
+        { p: st.p1, h: st.h1, l: st.l1 },
+        { p: st.p2, h: st.h2, l: st.l2 },
+      ];
+      const modes = [st.ot1, st.ot2];
+      const nc = [st.noc[1] === 'C', st.noc[3] === 'C'];
+      for (let i = 0; i < 2; i++) {
+        d._logic[i] = logic(modes[i], P, sets[i], hy, d._logic[i]);
+        const want = d._logic[i] !== nc[i];
+        if (!d._init) { d._out[i] = want; d._pend[i] = null; continue; }
+        if (want === d._out[i]) { d._pend[i] = null; continue; }
+        if (d._pend[i] === null) d._pend[i] = t;
+        if (t - d._pend[i] >= st.spd) { d._out[i] = want; d._pend[i] = null; }
+      }
+      d._init = true;
+    }
+
+    d.update = function (t, pressureKPa) {
+      d._now = t;
+      d._raw = Math.round(pressureKPa);
+      handleHolds(t);
+      const P = d._raw - d._zero;
+      if (t - d._shownAt >= d.settings.dsp) { d._shownP = P; d._shownAt = t; }
+      updateOutputs(t, P);
+    };
+
+    d.outputs = function () { return { out1: d._out[0], out2: d._out[1] }; };
+
+    function measureBottom() {
+      const st = d.settings, k = selKey();
+      const val = format(st[k], st.unt, 'bottom');
+      if (d._rollStart !== null && d._now < d._rollStart + T.FOCUS_MS) {
+        return Math.floor((d._now - d._rollStart) / T.ROLL_PHASE) % 2 === 0 ? ITEM_LABEL[k] : val;
+      }
+      if (focused()) return val;
+      if (st.sub === 'oFF') return '';
+      if (st.sub === 'Unit') return st.unt;
+      return val;
+    }
+
+    function color() {
+      if (d.mode !== 'measure') return 'orange';
+      const st = d.settings, [o1, o2] = d._out;
+      const active = st.dpy === 'oUt1' ? o1 : st.dpy === 'oUt2' ? o2 : st.dpy === 'And' ? (o1 && o2) : (o1 || o2);
+      if (st.clr === 'rEd') return 'red';
+      if (st.clr === 'GrEn') return 'green';
+      if (st.clr === 'r-on') return active ? 'red' : 'green';
+      return active ? 'green' : 'red';
+    }
+
+    d.view = function () {
+      const st = d.settings;
+      let top, bottom;
+      if (d.mode === 'basic') {
+        const k = BASIC_MENU[d._bIdx];
+        top = String(st[k]); bottom = LABEL[k];
+      } else if (d.mode === 'pro') {
+        if (d._pIdx < 0) { top = 'Pro'; bottom = 'SEt'; }
+        else { const k = PRO_MENU[d._pIdx]; top = String(st[k]); bottom = LABEL[k]; }
+      } else {
+        top = format(d._shownP, st.unt, 'top');
+        bottom = measureBottom();
+      }
+      if (d._msg && d._now < d._msg.until) {
+        if (d._msg.top !== undefined) top = d._msg.top;
+        if (d._msg.bottom !== undefined) bottom = d._msg.bottom;
+      }
+      const s = d._held.set;
+      return {
+        top, bottom, color: color(),
+        dim: st.pus === 'on' && d._now - d._lastAct >= T.DIM_AFTER,
+        led1: d._out[0], led2: d._out[1],
+        holdMs: s && !s.consumed && !d._combo ? d._now - s.start : 0,
+      };
+    };
+
+    return d;
+  }
+
+  return {
+    OPTIONS, LABEL, BASIC_MENU, PRO_MENU, ITEM_LABEL, ALL_LABELS, TIMING: T,
+    DEFAULTS: ORDERED_DEFAULTS, MACHINE, items, format, create,
+  };
+});
+</script>
+<script>/* FRLModel: tekanan keluaran regulator FRL AirTAC GFC300-10.
+   Knob 0..1440 derajat (4 putaran) -> setpoint 50..850 kPa, suplai 900 kPa, lag orde-1 tau 400 ms. */
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory();
+  else root.FRLModel = factory();
+})(typeof self !== 'undefined' ? self : this, function () {
+  'use strict';
+  const MIN_KPA = 50, MAX_KPA = 850, MAX_DEG = 1440, SUPPLY_KPA = 900, TAU_MS = 400;
+  const K = (MAX_KPA - MIN_KPA) / MAX_DEG;
+
+  function create(opts) {
+    const start = Math.max(MIN_KPA, Math.min(MAX_KPA, (opts && opts.pressureKPa) || 597));
+    let p = start;
+    const f = {
+      angle: (start - MIN_KPA) / K,
+      locked: true,
+      supply: true,
+      get setpointKPa() { return Math.round(MIN_KPA + f.angle * K); },
+      get pressureKPa() { return Math.round(p); },
+      setLocked(b) { f.locked = !!b; },
+      setSupply(on) { f.supply = !!on; },
+      rotate(deltaDeg) {
+        if (f.locked || !Number.isFinite(deltaDeg)) return;
+        f.angle = Math.max(0, Math.min(MAX_DEG, f.angle + deltaDeg));
+      },
+      reset(kpa) {
+        const k = Math.max(MIN_KPA, Math.min(MAX_KPA, kpa));
+        f.angle = (k - MIN_KPA) / K; p = k; f.locked = true; f.supply = true;
+      },
+      update(dtMs) {
+        const target = f.supply ? Math.min(SUPPLY_KPA, MIN_KPA + f.angle * K) : 0;
+        p += (target - p) * (1 - Math.exp(-Math.max(0, dtMs) / TAU_MS));
+      },
+    };
+    return f;
+  }
+  return { create, MIN_KPA, MAX_KPA, MAX_DEG, SUPPLY_KPA };
+});
+</script>
+<script>/* I18N: teks antarmuka simulator dalam Bahasa Indonesia (id) dan Mandarin aksara sederhana (zh).
+   Kode LCD (EASY, rSt, SET, ...) sengaja tidak diterjemahkan karena alat asli menampilkannya apa adanya. */
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory();
+  else root.I18N = factory();
+})(typeof self !== 'undefined' ? self : this, function () {
+  'use strict';
+  const LANGS = ['id', 'zh'];
+  const DICT = {
+    id: {
+      'header.title': 'Simulator Pressure Sensor AirTAC DPS',
+      'header.sub': 'DPSN1-10 terpasang di FRL AirTAC GFC300-10 · latihan reset pabrik & setting tekanan · simulator latihan independen, bukan aplikasi resmi AirTAC',
+      'cam.close': 'Sensor', 'cam.sensor': 'Sensor + FRL', 'cam.all': 'Semua',
+      'ctl.reg': 'Regulator', 'knob.pull': 'Tarik knob', 'knob.push': 'Tekan knob (kunci)',
+      'knob.minus': '− turun', 'knob.plus': '+ naik',
+      'valve.btn': 'Katup suplai: {s}', 'valve.scene': 'Katup: {s}', 'valve.open': 'BUKA', 'valve.closed': 'TUTUP',
+      'ctl.combo': 'Tekan bersamaan (tahan 1 dtk)',
+      'combo.zero': '▲+▼ zero', 'combo.lock': '▲+SET kunci', 'combo.unlock': '▼+SET buka',
+      'panel.h': 'Panel Monitor Output', 'panel.hs': '· kabel dari soket sensor',
+      'wire.brown': 'coklat +24V', 'wire.black': 'hitam OUT1', 'wire.white': 'putih OUT2', 'wire.blue': 'biru 0V',
+      'legend.p': 'tekanan', 'legend.o1': 'setting OUT1', 'legend.o2': 'setting OUT2',
+      'trend.scale': '0–{max} {u} · 30 dtk · pita = OUT ON',
+      'lesson.h': 'Latihan', 'lesson.finish': 'Selesai! Semua langkah benar ✔',
+      'lesson.start': 'Mulai episode ini', 'lesson.again': 'Ulangi episode',
+      'lesson.press': 'Tekan "Mulai episode ini".', 'lesson.started': '{t} dimulai',
+      'ctl.h': 'Kontrol simulator', 'ctl.machine': 'Muat setting mesin', 'ctl.factory': 'Mulai dari pabrik',
+      'sound': 'Suara: {s}',
+      'msg.machine': 'Setting mesin dimuat', 'msg.factory': 'Setelan pabrik (default)',
+      'kbd': 'Keyboard: <kbd>←</kbd> ▲ · <kbd>Spasi</kbd>/<kbd>Enter</kbd> SET · <kbd>→</kbd> ▼ (bisa ditahan bersamaan). Di HP: tekan dua tombol dengan dua jari.',
+      'codes.h': 'Arti kode di LCD',
+      'badge.measure': 'Layar ukur', 'badge.basic': 'Mode Basic', 'badge.pro': 'Mode Pro', 'badge.locked': ' · 🔒 terkunci',
+      'reg.info': 'Regulator {v} MPa · knob {s}', 'reg.locked': 'terkunci', 'reg.open': 'terbuka',
+      'hint.knob': 'Tarik knob dulu (klik knob atau tombol "Tarik knob").',
+      'hold.measure1': 'Menahan SET… {s} dtk (2 dtk = Basic, 4 dtk = Pro)',
+      'hold.measure2': 'Lepas sekarang → mode Basic · tahan terus sampai 4 dtk → mode Pro ({s} dtk)',
+      'hold.exit': 'Tahan SET 2 dtk → kembali ke layar ukur ({s} dtk)',
+      'mode.EASY': 'Basic', 'mode.HYS': 'Hysteresis', 'mode.uCnP': 'Window',
+      'scene.supply': 'Suplai 0.9 MPa', 'scene.tomachine': '→ ke mesin', 'scene.panel': 'PANEL MONITOR 24 VDC',
+      'lang.label': 'Bahasa',
+    },
+    zh: {
+      'header.title': 'AirTAC DPS 压力传感器模拟器',
+      'header.sub': 'DPSN1-10 安装在 AirTAC GFC300-10 三联件上 · 恢复出厂设置与压力设定练习 · 独立练习模拟器，非 AirTAC 官方应用',
+      'cam.close': '传感器', 'cam.sensor': '传感器 + 三联件', 'cam.all': '全景',
+      'ctl.reg': '调压阀', 'knob.pull': '拉起旋钮', 'knob.push': '按下旋钮（锁定）',
+      'knob.minus': '− 降低', 'knob.plus': '+ 升高',
+      'valve.btn': '供气阀：{s}', 'valve.scene': '阀门：{s}', 'valve.open': '开', 'valve.closed': '关',
+      'ctl.combo': '同时按下（按住 1 秒）',
+      'combo.zero': '▲+▼ 清零', 'combo.lock': '▲+SET 锁定', 'combo.unlock': '▼+SET 解锁',
+      'panel.h': '输出监视面板', 'panel.hs': '· 传感器插座引出的电缆',
+      'wire.brown': '棕色 +24V', 'wire.black': '黑色 OUT1', 'wire.white': '白色 OUT2', 'wire.blue': '蓝色 0V',
+      'legend.p': '压力', 'legend.o1': 'OUT1 设定', 'legend.o2': 'OUT2 设定',
+      'trend.scale': '0–{max} {u} · 30 秒 · 色带 = OUT 导通',
+      'lesson.h': '练习', 'lesson.finish': '完成！所有步骤正确 ✔',
+      'lesson.start': '开始本集', 'lesson.again': '重新练习',
+      'lesson.press': '请点击“开始本集”。', 'lesson.started': '{t} 已开始',
+      'ctl.h': '模拟器控制', 'ctl.machine': '载入机器设定', 'ctl.factory': '从出厂设置开始',
+      'sound': '声音：{s}',
+      'msg.machine': '已载入机器设定', 'msg.factory': '出厂设置（默认）',
+      'kbd': '键盘：<kbd>←</kbd> ▲ · <kbd>空格</kbd>/<kbd>Enter</kbd> SET · <kbd>→</kbd> ▼（可同时按住）。手机上：用两根手指同时按两个键。',
+      'codes.h': 'LCD 代码含义',
+      'badge.measure': '测量画面', 'badge.basic': '基本模式', 'badge.pro': 'Pro 模式', 'badge.locked': ' · 🔒 已锁定',
+      'reg.info': '调压阀 {v} MPa · 旋钮{s}', 'reg.locked': '已锁定', 'reg.open': '已拉起',
+      'hint.knob': '请先拉起旋钮（点击旋钮或“拉起旋钮”按钮）。',
+      'hold.measure1': '按住 SET… {s} 秒（2 秒 = 基本模式，4 秒 = Pro）',
+      'hold.measure2': '现在松开 → 基本模式 · 继续按住到 4 秒 → Pro 模式（{s} 秒）',
+      'hold.exit': '按住 SET 2 秒 → 返回测量画面（{s} 秒）',
+      'mode.EASY': '基本', 'mode.HYS': '迟滞', 'mode.uCnP': '窗口比较',
+      'scene.supply': '供气 0.9 MPa', 'scene.tomachine': '→ 去机器', 'scene.panel': '输出监视面板 24 VDC',
+      'lang.label': '语言',
+    },
+  };
+
+  const CODES = [
+    ['EASY', { id: 'Mode basic: ON jika tekanan > P + hysteresis (setting 1-P / 2-P)', zh: '基本模式：压力 > P + 迟滞时 ON（设定 1-P / 2-P）' }],
+    ['HYS', { id: 'Mode hysteresis: ON jika > H, OFF jika < L (1-H/1-L, 2-H/2-L)', zh: '迟滞模式：> H 时 ON，< L 时 OFF（1-H/1-L、2-H/2-L）' }],
+    ['uCnP', { id: 'Window comparator: ON jika tekanan di antara L dan H', zh: '窗口比较模式：压力在 L 与 H 之间时 ON' }],
+    ['ot1 / ot2', { id: 'Mode OUT1 / OUT2', zh: 'OUT1 / OUT2 的输出模式' }],
+    ['1o2o', { id: 'noC: OUT1 N.O., OUT2 N.O. (1C = N.C.)', zh: 'noC：OUT1 常开，OUT2 常开（1C = 常闭）' }],
+    ['SPd', { id: 'Waktu respons output 2–5000 ms', zh: '输出响应时间 2–5000 ms' }],
+    ['CLr', { id: 'Warna: r-on merah saat ON · G-on hijau saat ON · rEd selalu merah · GrEn selalu hijau', zh: '颜色：r-on 导通时红 · G-on 导通时绿 · rEd 常红 · GrEn 常绿' }],
+    ['Unt', { id: 'Satuan: MPA, kPA, kgF, bAr, PSI, cMHg, inHg', zh: '单位：MPA、kPA、kgF、bAr、PSI、cMHg、inHg' }],
+    ['Pro / SEt', { id: 'Masuk mode Pro (tahan SET 4 detik)', zh: '进入 Pro 模式（按住 SET 4 秒）' }],
+    ['Sub', { id: 'Isi baris bawah: Std nilai setting · oFF kosong · Unit satuan', zh: '下排显示：Std 设定值 · oFF 不显示 · Unit 单位' }],
+    ['dSP', { id: 'Kecepatan refresh angka 100–1000 ms', zh: '显示刷新周期 100–1000 ms' }],
+    ['HYS 1–8', { id: 'Besar hysteresis (kPa)', zh: '迟滞量（kPa）' }],
+    ['PuS', { id: 'Hemat daya: layar redup setelah 30 detik', zh: '省电：30 秒后屏幕变暗' }],
+    ['dPY', { id: 'Output yang menentukan warna: oUt1, oUt2, And, or', zh: '决定颜色的输出：oUt1、oUt2、And、or' }],
+    ['CPY', { id: 'Salin setting antar sensor (CP-M master, CP-S slave)', zh: '传感器之间复制设定（CP-M 主机，CP-S 从机）' }],
+    ['rSt', { id: 'Reset pabrik: on lalu tahan SET 2 detik', zh: '恢复出厂：设为 on 后按住 SET 2 秒' }],
+    ['LoCK on/oFF', { id: 'Kunci tombol: ▲+SET kunci · ▼+SET buka', zh: '按键锁：▲+SET 锁定 · ▼+SET 解锁' }],
+    ['LCK', { id: 'Tombol sedang terkunci', zh: '按键已锁定' }],
+    ['0000 Adj', { id: 'Zero clear (▲+▼) berhasil · Err = tekanan terlalu jauh dari nol', zh: '清零（▲+▼）成功 · Err = 压力离零点太远' }],
+  ];
+
+  function t(lang, key, vars) {
+    const d = DICT[lang] || DICT.id;
+    let s = d[key] !== undefined ? d[key] : DICT.id[key] !== undefined ? DICT.id[key] : key;
+    if (vars) for (const k of Object.keys(vars)) s = s.split('{' + k + '}').join(String(vars[k]));
+    return s;
+  }
+  // Teks dwibahasa { id, zh } -> string sesuai bahasa.
+  function pick(lang, obj) { return typeof obj === 'string' ? obj : (obj[lang] || obj.id); }
+
+  return { LANGS, DICT, CODES, t, pick };
+});
+</script>
+<script>/* Lessons: langkah latihan Episode 1-3 (desain bagian 5). Setiap langkah punya done(dps). */
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory();
+  else root.Lessons = factory();
+})(typeof self !== 'undefined' ? self : this, function () {
+  'use strict';
+  const isDefaults = (d) => {
+    const s = d.settings;
+    return s.ot1 === 'EASY' && s.ot2 === 'EASY' && s.noc === '1o2o' && s.spd === 2 && s.clr === 'r-on' &&
+      s.unt === 'MPA' && s.sub === 'Std' && s.dsp === 100 && s.hys === 1 && s.pus === 'oFF' &&
+      s.dpy === 'oUt1' && s.cpy === 'oFF' && s.rst === 'oFF' &&
+      !s.p1 && !s.h1 && !s.l1 && !s.p2 && !s.h2 && !s.l2;
+  };
+  const bottom = (d) => d.view().bottom;
+
+  const EPISODES = [
+    {
+      id: 'reset', title: { id: 'Ep 1 · Reset Pabrik', zh: '第 1 集 · 恢复出厂设置' },
+      intro: { id: 'Mulai dari setting mesin. Kembalikan sensor ke setelan pabrik.', zh: '从机器设定开始，把传感器恢复到出厂设置。' },
+      start: { preset: 'machine' },
+      steps: [
+        { text: { id: 'Tahan SET 4 detik sampai muncul Pro / SEt (oranye).', zh: '按住 SET 4 秒，直到显示 Pro / SEt（橙色）。' }, done: (d) => d.mode === 'pro' },
+        { text: { id: 'Tekan SET berulang (7×) sampai baris bawah rSt.', zh: '重复按 SET（7 次），直到下排显示 rSt。' }, done: (d) => d.mode === 'pro' && bottom(d) === 'rSt' },
+        { text: { id: 'Tekan ▲ sekali: oFF menjadi on.', zh: '按一次 ▲：oFF 变为 on。' }, done: (d) => d.settings.rst === 'on' },
+        { text: { id: 'Tahan SET 2 detik untuk keluar. Semua setting kembali ke pabrik.', zh: '按住 SET 2 秒退出，所有设定恢复出厂值。' }, done: (d) => d.mode === 'measure' && isDefaults(d) },
+      ],
+    },
+    {
+      id: 'mode', title: { id: 'Ep 2 · Mode Output', zh: '第 2 集 · 输出模式' },
+      intro: { id: 'Sensor sudah direset. Atur mode OUT1, OUT2, dan warna.', zh: '传感器已恢复出厂，现在设定 OUT1、OUT2 的模式和颜色。' },
+      start: { preset: 'factory' },
+      steps: [
+        { text: { id: 'Tahan SET 2 detik lalu lepas: muncul EASY / ot1 (mode Basic).', zh: '按住 SET 2 秒后松开：显示 EASY / ot1（基本模式）。' }, done: (d) => d.mode === 'basic' },
+        { text: { id: 'Tekan ▲ dua kali sampai uCnP (window) untuk OUT1.', zh: '按两次 ▲，把 OUT1 设为 uCnP（窗口比较）。' }, done: (d) => d.settings.ot1 === 'uCnP' },
+        { text: { id: 'Tekan SET → ot2: biarkan EASY.', zh: '按 SET → ot2：保持 EASY。' }, done: (d) => d.mode === 'basic' && bottom(d) === 'ot2' },
+        { text: { id: 'Tekan SET → noC: biarkan 1o2o (OUT1 & OUT2 N.O.).', zh: '按 SET → noC：保持 1o2o（OUT1 和 OUT2 常开）。' }, done: (d) => d.mode === 'basic' && bottom(d) === 'noC' },
+        { text: { id: 'Tekan SET → SPd: biarkan 2 (ms).', zh: '按 SET → SPd：保持 2（ms）。' }, done: (d) => d.mode === 'basic' && bottom(d) === 'SPd' },
+        { text: { id: 'Tekan SET → CLr, lalu ▲ sekali sampai G-on.', zh: '按 SET → CLr，再按一次 ▲ 调到 G-on。' }, done: (d) => d.settings.clr === 'G-on' },
+        { text: { id: 'Tekan SET → Unt: pastikan MPA (MPa).', zh: '按 SET → Unt：确认为 MPA（MPa）。' }, done: (d) => d.mode === 'basic' && bottom(d) === 'Unt' && d.settings.unt === 'MPA' },
+        { text: { id: 'Tahan SET 2 detik untuk kembali ke layar ukur.', zh: '按住 SET 2 秒返回测量画面。' }, done: (d) => d.mode === 'measure' },
+      ],
+    },
+    {
+      id: 'nilai', title: { id: 'Ep 3 · Nilai Tekanan', zh: '第 3 集 · 压力设定值' },
+      intro: { id: 'Mode sudah diatur. Isi batas tekanan lalu uji dengan knob regulator.', zh: '模式已设定好。输入压力上下限，再用调压阀旋钮测试。' },
+      start: { preset: 'factory', settings: { ot1: 'uCnP', clr: 'G-on' } },
+      steps: [
+        { text: { id: 'Tekan SET: baris bawah menampilkan 1-H.', zh: '按 SET：下排显示 1-H。' }, done: (d) => d.mode === 'measure' && bottom(d) === '1-H' },
+        { text: { id: 'Tahan ▲ lalu ketuk ▲/▼ sampai .660 (0.660 MPa).', zh: '按住 ▲，再点按 ▲/▼ 调到 .660（0.660 MPa）。' }, done: (d) => d.settings.h1 === 660 },
+        { text: { id: 'Tekan SET → 1-L.', zh: '按 SET → 1-L。' }, done: (d) => bottom(d) === '1-L' },
+        { text: { id: 'Atur sampai .450 (0.450 MPa).', zh: '调到 .450（0.450 MPa）。' }, done: (d) => d.settings.l1 === 450 },
+        { text: { id: 'Tekan SET → 2-P.', zh: '按 SET → 2-P。' }, done: (d) => bottom(d) === '2-P' },
+        { text: { id: 'Atur sampai .450 (0.450 MPa).', zh: '调到 .450（0.450 MPa）。' }, done: (d) => d.settings.p2 === 450 },
+        { text: { id: 'Tarik knob regulator, putar turun di bawah 0.450: OUT1 & OUT2 mati.', zh: '拉起调压阀旋钮，调低到 0.450 以下：OUT1 和 OUT2 断开。' }, done: (d) => { const o = d.outputs(); return !o.out1 && !o.out2; } },
+        {
+          text: { id: 'Putar naik lagi ke ±0.597: layar hijau, OUT1 & OUT2 menyala.', zh: '再调高到约 0.597：屏幕变绿，OUT1 和 OUT2 导通。' },
+          done: (d) => {
+            const o = d.outputs(), s = d.settings;
+            return o.out1 && o.out2 && d.view().color === 'green' && s.h1 === 660 && s.l1 === 450 && s.p2 === 450;
+          },
+        },
+      ],
+    },
+  ];
+
+  function tracker(ep) {
+    const tr = {
+      index: 0,
+      get finished() { return tr.index >= ep.steps.length; },
+      check(d) {
+        let moved = false;
+        while (tr.index < ep.steps.length && ep.steps[tr.index].done(d)) { tr.index++; moved = true; }
+        return moved;
+      },
+    };
+    return tr;
+  }
+
+  return { EPISODES, tracker };
+});
+</script>
+<script>/* UI simulator: menggambar LCD, menghubungkan tombol/knob/katup, panel monitor, grafik, latihan. */
+(function () {
+  'use strict';
+  const $ = (s, r) => (r || document).querySelector(s);
+  const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+  const NS = 'http://www.w3.org/2000/svg';
+  const now = () => performance.now();
+
+  let dps = DPSCore.create({ preset: 'machine' });
+
+  // ================= Bahasa (ID / 中文) =================
+  let lang = 'id';
+  try {
+    const h = location.hash.replace('#', ''), saved = localStorage.getItem('dps-lang');
+    lang = I18N.LANGS.includes(h) ? h : I18N.LANGS.includes(saved) ? saved : 'id';
+  } catch (e) { /* storage tidak tersedia */ }
+  const T = (k, v) => I18N.t(lang, k, v);
+  const P = (o) => I18N.pick(lang, o);
+  const frl = FRLModel.create({ pressureKPa: 597 });
+
+  // ================= LCD =================
+  function mk(tag, attrs, parent) {
+    const e = document.createElementNS(NS, tag);
+    for (const k in attrs) e.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+  const hseg = (x0, x1, y, t) => { const h = t / 2; return [[x0, y], [x0 + h, y - h], [x1 - h, y - h], [x1, y], [x1 - h, y + h], [x0 + h, y + h]]; };
+  const vseg = (x, y0, y1, t) => { const h = t / 2; return [[x, y0], [x + h, y0 + h], [x + h, y1 - h], [x, y1], [x - h, y1 - h], [x - h, y0 + h]]; };
+
+  function buildDigit(parent, x, y, w, h, t, half) {
+    const L = x + t / 2, R = x + w - t / 2, T = y + t / 2, M = y + h / 2, B = y + h - t / 2, g = t * 0.3;
+    const P = {
+      a: hseg(L + g, R - g, T, t), b: vseg(R, T + g, M - g, t), c: vseg(R, M + g, B - g, t),
+      d: hseg(L + g, R - g, B, t), e: vseg(L, M + g, B - g, t), f: vseg(L, T + g, M - g, t), g: hseg(L + g, R - g, M, t),
+    };
+    const grp = mk('g', { transform: 'skewX(-7) translate(' + ((y + h / 2) * 0.1228).toFixed(2) + ',0)' }, parent);
+    const segs = 'abcdefg'.split('').map((k) => {
+      const p = mk('polygon', { points: P[k].map((q) => q.map((n) => n.toFixed(2)).join(',')).join(' '), class: 'seg' }, grp);
+      if (half && 'bcg'.indexOf(k) < 0) p.style.display = 'none';
+      return p;
+    });
+    const dp = mk('circle', { cx: (R + t * 1.05).toFixed(2), cy: B.toFixed(2), r: (t * 0.55).toFixed(2), class: 'seg' }, grp);
+    return { segs, dp };
+  }
+
+  const lcdEl = $('#lcd');
+  const lcdSvg = mk('svg', { viewBox: '0 0 100 66', preserveAspectRatio: 'none' }, lcdEl);
+  (function defs() {
+    const d = mk('defs', {}, lcdSvg);
+    const grad = (id, a, b) => {
+      const g = mk('radialGradient', { id, cx: '.5', cy: '.35', r: '.85' }, d);
+      mk('stop', { offset: '0', 'stop-color': a }, g); mk('stop', { offset: '1', 'stop-color': b }, g);
+    };
+    grad('bgGreen', '#12300a', '#040b02');
+    grad('bgRed', '#4a0806', '#140101');
+    grad('bgOrange', '#4a1c05', '#170701');
+    grad('bgBot', '#0f2609', '#030902');
+  })();
+  mk('rect', { class: 'bg-top', x: 0, y: 0, width: 100, height: 41 }, lcdSvg);
+  mk('rect', { class: 'bg-bot', x: 0, y: 41, width: 100, height: 25 }, lcdSvg);
+  mk('line', { x1: 0, y1: 41, x2: 100, y2: 41, stroke: 'rgba(255,255,255,.08)', 'stroke-width': '.5' }, lcdSvg);
+  const rowTop = mk('g', { class: 'row-top' }, lcdSvg);
+  const rowBot = mk('g', { class: 'row-bot' }, lcdSvg);
+  const topDigits = [0, 1, 2, 3].map((i) => buildDigit(rowTop, 9 + i * 21.5, 5, 17, 31, 3.5, false));
+  const botDigits = [buildDigit(rowBot, 44, 45, 6.5, 17, 2.3, true)]
+    .concat([0, 1, 2].map((i) => buildDigit(rowBot, 54 + i * 14.5, 45, 11, 17, 2.3, false)));
+  const out1Lbl = mk('text', { x: 4, y: 52, class: 'outlbl' }, lcdSvg); out1Lbl.textContent = 'OUT 1';
+  const out2Lbl = mk('text', { x: 4, y: 59.5, class: 'outlbl' }, lcdSvg); out2Lbl.textContent = 'OUT 2';
+
+  function renderRow(digits, text) {
+    let enc;
+    try { enc = Seg7.encode(text, digits.length); } catch (e) { enc = Seg7.encode('', digits.length); }
+    if (Seg7.leadingDot(text)) {
+      const used = Seg7.encode(text, 8).filter((x) => x.segs || x.dp).length;
+      const idx = digits.length - used - 1;
+      if (idx >= 0) enc[idx].dp = true;
+    }
+    digits.forEach((dg, i) => {
+      for (let b = 0; b < 7; b++) dg.segs[b].classList.toggle('on', !!(enc[i].segs & (1 << b)));
+      dg.dp.classList.toggle('on', enc[i].dp);
+    });
+  }
+
+  let lastView = '';
+  function renderLCD(v) {
+    const key = [v.top, v.bottom, v.color, v.dim, v.led1, v.led2].join('|');
+    if (key === lastView) return;
+    lastView = key;
+    renderRow(topDigits, v.top);
+    renderRow(botDigits, v.bottom);
+    lcdEl.classList.toggle('c-red', v.color === 'red');
+    lcdEl.classList.toggle('c-orange', v.color === 'orange');
+    lcdEl.classList.toggle('dim', v.dim);
+    out1Lbl.classList.toggle('on', v.led1);
+    out2Lbl.classList.toggle('on', v.led2);
+  }
+
+  // ================= Sound =================
+  let soundOn = true, actx = null;
+  function click(down) {
+    if (!soundOn) return;
+    try {
+      actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+      const len = Math.floor(actx.sampleRate * 0.006);
+      const buf = actx.createBuffer(1, len, actx.sampleRate);
+      const ch = buf.getChannelData(0);
+      for (let i = 0; i < len; i++) ch[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3);
+      const src = actx.createBufferSource(); src.buffer = buf;
+      const f = actx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = down ? 3200 : 4200; f.Q.value = 1.2;
+      const g = actx.createGain(); g.gain.value = down ? 0.35 : 0.18;
+      src.connect(f); f.connect(g); g.connect(actx.destination); src.start();
+    } catch (e) { /* audio tidak tersedia */ }
+  }
+
+  // ================= Keys =================
+  const dpsEl = $('#dps');
+  const keyEls = { up: $('[data-btn=up]'), set: $('[data-btn=set]'), down: $('[data-btn=down]') };
+  const pressedBy = { up: new Set(), set: new Set(), down: new Set() };
+  function updateBody() { dpsEl.classList.toggle('pushing', Object.values(pressedBy).some((s) => s.size)); }
+  function srcDown(btn, src) {
+    const s = pressedBy[btn];
+    if (s.has(src)) return;
+    s.add(src);
+    if (s.size === 1) {
+      dps.press(btn, now());
+      const el = keyEls[btn];
+      el.classList.remove('bounce');
+      el.classList.add('pressed');
+      click(true); updateBody();
+    }
+  }
+  function srcUp(btn, src) {
+    const s = pressedBy[btn];
+    if (!s.has(src)) return;
+    s.delete(src);
+    if (s.size === 0) {
+      dps.release(btn, now());
+      const el = keyEls[btn];
+      el.classList.remove('pressed');
+      void el.offsetWidth;
+      el.classList.add('bounce');
+      click(false); updateBody();
+    }
+  }
+  function releaseAll() { for (const b in pressedBy) for (const s of Array.from(pressedBy[b])) srcUp(b, s); }
+
+  Object.keys(keyEls).forEach((btn) => {
+    const el = keyEls[btn];
+    el.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      try { el.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+      srcDown(btn, 'p' + e.pointerId);
+    });
+    const up = (e) => srcUp(btn, 'p' + e.pointerId);
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+    el.addEventListener('lostpointercapture', up);
+    el.addEventListener('keydown', (e) => { if (e.key === ' ' || e.key === 'Enter') e.preventDefault(); });
+  });
+  dpsEl.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  const KEYMAP = { ArrowLeft: 'up', ArrowRight: 'down', ' ': 'set', Enter: 'set' };
+  window.addEventListener('keydown', (e) => {
+    const b = KEYMAP[e.key];
+    if (!b) return;
+    const t = e.target;
+    if (t && t.closest && t.closest('button, select, input, summary') && !t.closest('.dps')) return;
+    e.preventDefault();
+    if (!e.repeat) srcDown(b, 'kb' + e.key);
+  });
+  window.addEventListener('keyup', (e) => { const b = KEYMAP[e.key]; if (b) srcUp(b, 'kb' + e.key); });
+  window.addEventListener('blur', releaseAll);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) releaseAll(); });
+
+  $$('[data-combo]').forEach((el) => {
+    const [a, b] = el.dataset.combo.split(',');
+    const src = 'combo' + el.dataset.combo;
+    el.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      try { el.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+      el.classList.add('active');
+      srcDown(a, src);
+      srcDown(b, src);
+    });
+    const up = () => { if (!el.classList.contains('active')) return; el.classList.remove('active'); srcUp(b, src); srcUp(a, src); };
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+    el.addEventListener('lostpointercapture', up);
+  });
+
+  // ================= Toast =================
+  const toastEl = $('#toast');
+  let toastUntil = 0, toastFixed = '';
+  function hint(msg, ms) { toastEl.textContent = msg; toastUntil = now() + (ms || 1800); }
+
+  // ================= Knob & valve =================
+  const knobBody = $('#knobBody'), ridges = $('#knobRidges');
+  for (let i = 0; i < 18; i++) mk('line', { x1: 0, y1: 62, x2: 0, y2: 150, 'data-i': i }, ridges);
+  const ridgeLines = Array.from(ridges.children);
+  function renderKnob() {
+    knobBody.classList.toggle('pulled', !frl.locked);
+    const off = (frl.angle * 0.5) % 7;
+    ridgeLines.forEach((l, i) => {
+      const x = 306 + i * 7 + off;
+      l.setAttribute('x1', x.toFixed(1)); l.setAttribute('x2', x.toFixed(1));
+    });
+    $('#regInfo').textContent = T('reg.info', { v: (frl.setpointKPa / 1000).toFixed(3), s: T(frl.locked ? 'reg.locked' : 'reg.open') });
+    $('#knobPull').textContent = T(frl.locked ? 'knob.pull' : 'knob.push');
+    $('#knobPull').classList.toggle('on', !frl.locked);
+  }
+  function tryRotate(deg) {
+    if (frl.locked) { hint(T('hint.knob')); return; }
+    frl.rotate(deg); renderKnob();
+  }
+  const knobEl = $('#knob');
+  let drag = null;
+  knobEl.addEventListener('pointerdown', (e) => {
+    e.preventDefault(); e.stopPropagation();
+    try { knobEl.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+    drag = { x: e.clientX, total: 0 };
+  });
+  knobEl.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    const dx = e.clientX - drag.x; drag.x = e.clientX; drag.total += Math.abs(dx);
+    if (drag.total > 5) tryRotate(dx * 1.6);
+  });
+  const endDrag = () => {
+    if (drag && drag.total <= 5) { frl.setLocked(!frl.locked); renderKnob(); click(true); }
+    drag = null;
+  };
+  knobEl.addEventListener('pointerup', endDrag);
+  knobEl.addEventListener('pointercancel', () => { drag = null; });
+  knobEl.addEventListener('wheel', (e) => { e.preventDefault(); tryRotate(-e.deltaY * 0.25); }, { passive: false });
+  $('#knobPull').addEventListener('click', (e) => { frl.setLocked(!frl.locked); renderKnob(); e.currentTarget.blur(); });
+  [['#knobMinus', -18], ['#knobPlus', 18]].forEach(([sel, step]) => {
+    const el = $(sel);
+    let timer = null;
+    const stop = () => { clearInterval(timer); timer = null; };
+    el.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      tryRotate(step);
+      stop(); timer = setInterval(() => tryRotate(step), 90);
+    });
+    ['pointerup', 'pointerleave', 'pointercancel'].forEach((ev) => el.addEventListener(ev, stop));
+  });
+
+  function renderValve() {
+    $('#valveLever').style.transform = frl.supply ? 'rotate(0deg)' : 'rotate(90deg)';
+    const vs = T(frl.supply ? 'valve.open' : 'valve.closed');
+    $('#valveTxt').textContent = T('valve.scene', { s: vs });
+    const b = $('#valveBtn');
+    b.textContent = T('valve.btn', { s: vs });
+    b.classList.toggle('on', frl.supply);
+  }
+  function toggleValve() { frl.setSupply(!frl.supply); renderValve(); click(true); }
+  $('#valve').addEventListener('click', toggleValve);
+  $('#valveBtn').addEventListener('click', (e) => { toggleValve(); e.currentTarget.blur(); });
+
+  // ================= Camera =================
+  const CAMS = {
+    close: { x: 262, y: 44, w: 196, h: 286 },
+    sensor: { x: 130, y: 30, w: 560, h: 420 },
+    all: { x: 0, y: 0, w: 1000, h: 700 },
+  };
+  const stage = $('#stage'), world = $('#world');
+  let cam = stage.clientWidth < 560 ? 'close' : 'sensor';
+  function applyCamera(instant) {
+    world.style.transition = instant === true ? 'none' : '';
+    const c = CAMS[cam], W = stage.clientWidth, H = stage.clientHeight;
+    const s = Math.min(W / c.w, H / c.h);
+    const tx = (W - c.w * s) / 2 - c.x * s, ty = (H - c.h * s) / 2 - c.y * s;
+    world.style.transform = 'translate(' + tx.toFixed(1) + 'px,' + ty.toFixed(1) + 'px) scale(' + s.toFixed(4) + ')';
+    $$('#cam [data-cam]').forEach((b) => b.classList.toggle('on', b.dataset.cam === cam));
+  }
+  $$('#cam [data-cam]').forEach((b) => b.addEventListener('click', () => { cam = b.dataset.cam; applyCamera(); b.blur(); }));
+  window.addEventListener('resize', () => applyCamera(true));
+
+  // ================= Hold ring =================
+  const holdRing = $('#holdRing'), holdArc = $('#holdArc'), marks = $('#holdMarks');
+  const C = 2 * Math.PI * 31;
+  let marksFor = '';
+  function renderHold(v) {
+    const full = dps.mode === 'measure' ? 4000 : 2000;
+    const show = v.holdMs > 150;
+    holdRing.classList.toggle('show', show);
+    if (marksFor !== dps.mode) {
+      marksFor = dps.mode;
+      marks.innerHTML = '';
+      const fr = dps.mode === 'measure' ? [0.5, 1] : [1];
+      fr.forEach((f) => {
+        const a = -Math.PI / 2 + f * 2 * Math.PI;
+        mk('circle', { cx: 60 + 31 * Math.cos(a), cy: 97 + 31 * Math.sin(a), r: 2.6, fill: '#fff', stroke: '#333', 'stroke-width': '.6' }, marks);
+      });
+    }
+    holdArc.setAttribute('stroke-dashoffset', (C * (1 - Math.min(1, v.holdMs / full))).toFixed(1));
+    if (!show) { toastFixed = ''; return; }
+    const s = (v.holdMs / 1000).toFixed(1);
+    if (dps.mode === 'measure') {
+      toastFixed = T(v.holdMs < 2000 ? 'hold.measure1' : 'hold.measure2', { s });
+    } else {
+      toastFixed = T('hold.exit', { s });
+    }
+  }
+  function renderToast(t) {
+    const msg = toastFixed || (t < toastUntil ? toastEl.textContent : '');
+    if (toastFixed) toastEl.textContent = toastFixed;
+    toastEl.classList.toggle('show', !!msg);
+  }
+
+  // ================= Panel =================
+  const modeName = (m) => T('mode.' + m);
+  function fmtU(kpa) { return DPSCore.format(kpa, dps.settings.unt, 'top') + ' ' + unitName(); }
+  function unitName() { return { MPA: 'MPa', kPA: 'kPa', kgF: 'kgf/cm²', bAr: 'bar', PSI: 'psi', cMHg: 'cmHg', inHg: 'inHg' }[dps.settings.unt]; }
+  function modeText(i) {
+    const st = dps.settings, m = i === 1 ? st.ot1 : st.ot2;
+    if (m === 'EASY') return modeName('EASY') + ' · P = ' + fmtU(i === 1 ? st.p1 : st.p2);
+    return modeName(m) + ' · L ' + DPSCore.format(i === 1 ? st.l1 : st.l2, st.unt, 'top') + ' – H ' + fmtU(i === 1 ? st.h1 : st.h2);
+  }
+  let lastPanel = '';
+  function renderPanel() {
+    const o = dps.outputs(), st = dps.settings;
+    const nc1 = st.noc[1] === 'C', nc2 = st.noc[3] === 'C';
+    const key = [o.out1, o.out2, st.noc, st.ot1, st.ot2, st.p1, st.h1, st.l1, st.p2, st.h2, st.l2, st.unt].join('|');
+    if (key === lastPanel) return;
+    lastPanel = key;
+    const s1 = (nc1 ? 'N.C.' : 'N.O.') + ' · ' + (o.out1 ? 'ON' : 'OFF');
+    const s2 = (nc2 ? 'N.C.' : 'N.O.') + ' · ' + (o.out2 ? 'ON' : 'OFF');
+    $('#pL1').classList.toggle('on', o.out1); $('#pL2').classList.toggle('on', o.out2);
+    $('#pS1').textContent = s1; $('#pS2').textContent = s2;
+    $('#pS1').classList.toggle('on', o.out1); $('#pS2').classList.toggle('on', o.out2);
+    $('#pM1').textContent = modeText(1); $('#pM2').textContent = modeText(2);
+    $('#sL1').setAttribute('fill', o.out1 ? 'url(#lampG)' : 'url(#lampOff)');
+    $('#sL2').setAttribute('fill', o.out2 ? 'url(#lampO)' : 'url(#lampOff)');
+    $('#sL1glow').setAttribute('opacity', o.out1 ? '.75' : '0');
+    $('#sL2glow').setAttribute('opacity', o.out2 ? '.75' : '0');
+    $('#sS1').textContent = s1; $('#sS2').textContent = s2;
+    $('#sM1').textContent = modeName(st.ot1); $('#sM2').textContent = modeName(st.ot2);
+  }
+
+  // ================= Trend =================
+  const cv = $('#trend'), hist = [];
+  let lastSample = 0;
+  const MAXP = 900;
+  function drawTrend() {
+    const dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
+    if (cv.width !== Math.round(W * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
+    const g = cv.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, W, H);
+    const top = 8, bandH = 9, plotH = H - top - bandH * 2 - 12, x0 = 4, pw = W - 8;
+    const y = (p) => top + plotH * (1 - Math.max(0, Math.min(MAXP, p)) / MAXP);
+    g.strokeStyle = 'rgba(255,255,255,.07)'; g.lineWidth = 1;
+    for (let p = 0; p <= MAXP; p += 300) { g.beginPath(); g.moveTo(x0, y(p)); g.lineTo(x0 + pw, y(p)); g.stroke(); }
+    g.fillStyle = 'rgba(255,255,255,.35)'; g.font = '10px Segoe UI, Arial';
+    for (let p = 300; p <= MAXP; p += 300) g.fillText(DPSCore.format(p, dps.settings.unt, 'top'), x0 + 2, y(p) - 2);
+    const st = dps.settings;
+    const lines = [];
+    if (st.ot1 === 'EASY') lines.push([st.p1, '#31c24a']); else lines.push([st.h1, '#31c24a'], [st.l1, '#31c24a']);
+    if (st.ot2 === 'EASY') lines.push([st.p2, '#f29a1a']); else lines.push([st.h2, '#f29a1a'], [st.l2, '#f29a1a']);
+    g.setLineDash([5, 4]); g.lineWidth = 1.5;
+    lines.forEach(([p, c]) => { g.strokeStyle = c; g.beginPath(); g.moveTo(x0, y(p)); g.lineTo(x0 + pw, y(p)); g.stroke(); });
+    g.setLineDash([]);
+    const n = 300, dx = pw / (n - 1), off = n - hist.length;
+    g.strokeStyle = '#e9eef3'; g.lineWidth = 2; g.beginPath();
+    hist.forEach((h, i) => { const X = x0 + (off + i) * dx; if (i) g.lineTo(X, y(h.p)); else g.moveTo(X, y(h.p)); });
+    g.stroke();
+    const by = top + plotH + 6;
+    [['o1', '#31c24a', by], ['o2', '#f29a1a', by + bandH + 2]].forEach(([k, c, yy]) => {
+      g.fillStyle = 'rgba(255,255,255,.08)'; g.fillRect(x0, yy, pw, bandH);
+      g.fillStyle = c;
+      hist.forEach((h, i) => { if (h[k]) g.fillRect(x0 + (off + i) * dx, yy, dx + 0.6, bandH); });
+    });
+    $('#trendScale').textContent = T('trend.scale', { max: DPSCore.format(MAXP, st.unt, 'top'), u: unitName() });
+  }
+
+  // ================= Lessons =================
+  let epIdx = 0, tracker = null;
+  function renderTabs() {
+    const tabs = $('#tabs'); tabs.innerHTML = '';
+    Lessons.EPISODES.forEach((ep, i) => {
+      const b = document.createElement('button');
+      b.className = 'btn small' + (i === epIdx ? ' active' : '');
+      b.textContent = P(ep.title);
+      b.addEventListener('click', () => { epIdx = i; tracker = null; renderTabs(); renderLesson(); b.blur(); });
+      tabs.appendChild(b);
+    });
+  }
+  function renderLesson() {
+    const ep = Lessons.EPISODES[epIdx];
+    $('#intro').textContent = P(ep.intro) + (tracker ? '' : ' ' + T('lesson.press'));
+    const ol = $('#steps'); ol.innerHTML = '';
+    ep.steps.forEach((s, i) => {
+      const li = document.createElement('li');
+      const done = tracker && i < tracker.index, cur = tracker && i === tracker.index;
+      li.className = done ? 'done' : cur ? 'cur' : '';
+      li.innerHTML = '<span class="n">' + (done ? '✓' : i + 1) + '</span><span></span>';
+      li.lastChild.textContent = P(s.text);
+      ol.appendChild(li);
+    });
+    $('#finish').classList.toggle('show', !!(tracker && tracker.finished));
+    $('#startEp').textContent = T(tracker ? 'lesson.again' : 'lesson.start');
+  }
+  function resetWorld(startOpts) {
+    releaseAll();
+    dps = DPSCore.create(startOpts);
+    frl.reset(597);
+    hist.length = 0;
+    lastView = ''; lastPanel = ''; marksFor = '';
+    dps.update(now(), frl.pressureKPa);
+    renderKnob(); renderValve();
+  }
+  $('#startEp').addEventListener('click', (e) => {
+    const ep = Lessons.EPISODES[epIdx];
+    resetWorld(ep.start);
+    tracker = Lessons.tracker(ep);
+    tracker.check(dps);
+    renderLesson();
+    hint(T('lesson.started', { t: P(ep.title) }), 1400);
+    e.currentTarget.blur();
+  });
+  $('#loadMachine').addEventListener('click', (e) => { resetWorld({ preset: 'machine' }); tracker = null; renderLesson(); hint(T('msg.machine')); e.currentTarget.blur(); });
+  $('#loadFactory').addEventListener('click', (e) => { resetWorld({ preset: 'factory' }); tracker = null; renderLesson(); hint(T('msg.factory')); e.currentTarget.blur(); });
+  $('#soundBtn').addEventListener('click', (e) => {
+    soundOn = !soundOn;
+    e.currentTarget.textContent = T('sound', { s: soundOn ? 'ON' : 'OFF' });
+    e.currentTarget.classList.toggle('on', soundOn);
+    e.currentTarget.blur();
+  });
+
+  // ================= Loop =================
+  const badge = $('#badge');
+  let last = now();
+  function frame(t) {
+    step(t);
+    requestAnimationFrame(frame);
+  }
+  function step(t) {
+    const dt = Math.max(0, Math.min(100, t - last)); last = t;
+    frl.update(dt);
+    dps.update(t, frl.pressureKPa);
+    const v = dps.view();
+    renderLCD(v);
+    renderHold(v);
+    renderToast(t);
+    renderPanel();
+    const bt = T('badge.' + dps.mode);
+    badge.innerHTML = (dps.mode === 'measure' ? bt : '<b>' + bt + '</b>') + (dps.locked ? T('badge.locked') : '');
+    if (t - lastSample >= 100) {
+      lastSample = t;
+      const o = dps.outputs();
+      hist.push({ p: frl.pressureKPa, o1: o.out1, o2: o.out2 });
+      if (hist.length > 300) hist.shift();
+      drawTrend();
+    }
+    if (tracker && !tracker.finished && tracker.check(dps)) { renderLesson(); click(true); }
+  }
+
+  // Akses baca untuk pengujian otomatis di browser.
+  window.__sim = { get dps() { return dps; }, frl, step: () => step(now()) };
+
+  function applyLang() {
+    document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'id';
+    $$('[data-i18n]').forEach((el) => { el.textContent = T(el.dataset.i18n); });
+    $$('[data-i18n-html]').forEach((el) => { el.innerHTML = T(el.dataset.i18nHtml); });
+    const tb = $('#codes'); tb.innerHTML = '';
+    I18N.CODES.forEach(([code, txt]) => {
+      const tr = document.createElement('tr'), a = document.createElement('td'), b = document.createElement('td');
+      a.textContent = code; b.textContent = P(txt); tr.append(a, b); tb.append(tr);
+    });
+    $$('[data-lang]').forEach((b) => b.classList.toggle('on', b.dataset.lang === lang));
+    $('#soundBtn').textContent = T('sound', { s: soundOn ? 'ON' : 'OFF' });
+    lastPanel = '';
+    renderKnob(); renderValve(); renderTabs(); renderLesson();
+  }
+  $$('[data-lang]').forEach((b) => b.addEventListener('click', () => {
+    lang = b.dataset.lang;
+    try { localStorage.setItem('dps-lang', lang); } catch (e) { /* storage tidak tersedia */ }
+    applyLang(); b.blur();
+  }));
+  window.addEventListener('hashchange', () => {
+    const h = location.hash.replace('#', '');
+    if (I18N.LANGS.includes(h)) { lang = h; applyLang(); }
+  });
+
+  applyLang(); applyCamera(true);
+  dps.update(now(), frl.pressureKPa);
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
